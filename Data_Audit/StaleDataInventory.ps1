@@ -4,7 +4,6 @@ param (
     [string]$OutputFile = "StaleDataReport.csv"
 )
 
-# Function to convert bytes to human-readable format
 function Format-FileSize {
     param ([int64]$Size)
     $sizes = 'Bytes,KB,MB,GB,TB'
@@ -17,14 +16,13 @@ function Format-FileSize {
     "{0:N2} {1}" -f $Size, $sizes[$index]
 }
 
-# Function to convert human-readable size to bytes
 function Convert-ToBytes {
     param (
         [string]$Size
     )
     
     $size = $size.Trim().ToUpper()
-    if ($size -match '^\d+$') { return [int64]$size }  # Just a number means bytes
+    if ($size -match '^\d+$') { return [int64]$size } 
     
     $value = [int64]($size -replace '[^0-9.]', '')
     $unit = $size -replace '[0-9.]', ''
@@ -38,7 +36,6 @@ function Convert-ToBytes {
     }
 }
 
-# Function to show menu and get user selection(s)
 function Show-Menu {
     param (
         [string]$Title = 'Select an option',
@@ -73,7 +70,6 @@ function Show-Menu {
     }
 }
 
-# Function to get available drives
 function Get-AvailableDrives {
     $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 }
     return $drives | ForEach-Object {
@@ -84,11 +80,9 @@ function Get-AvailableDrives {
     }
 }
 
-# Function to get scan parameters
 function Get-ScanParameters {
     $params = @{}
     
-    # Get last access time threshold
     Write-Host "`nSelect last access time threshold:"
     $timeOptions = @(
         "30 days",
@@ -108,7 +102,6 @@ function Get-ScanParameters {
         $params.LastAccessDays = [int]($timeChoice -replace " days","")
     }
     
-    # Get minimum file size
     Write-Host "`nSelect minimum file size to consider:"
     $sizeOptions = @(
         "1 MB",
@@ -131,23 +124,19 @@ function Get-ScanParameters {
     return $params
 }
 
-# Function to remove stale data based on CSV report
 function Remove-StaleData {
     param (
         [Parameter(Mandatory = $true)]
         [string]$CsvPath
     )
 
-    # Verify CSV exists
     if (-not (Test-Path $CsvPath)) {
         Write-Error "CSV file not found: $CsvPath"
         return
     }
 
-    # Import CSV
     $filesToDelete = Import-Csv -Path $CsvPath
 
-    # Show summary before deletion
     $totalFiles = $filesToDelete.Count
     $totalSize = ($filesToDelete | Measure-Object -Property SizeInBytes -Sum).Sum
     $totalSizeReadable = Format-FileSize -Size $totalSize
@@ -156,19 +145,16 @@ function Remove-StaleData {
     Write-Host "Total files to delete: $totalFiles"
     Write-Host "Total size to be freed: $totalSizeReadable"
 
-    # Ask for confirmation
     $confirmation = Read-Host "`nAre you sure you want to delete these files? (Y/N)"
     if ($confirmation -ne 'Y') {
         Write-Host "Operation cancelled by user."
         return
     }
 
-    # Initialize counters
     $deletedFiles = 0
     $failedFiles = 0
     $progress = 0
 
-    # Process each file
     foreach ($file in $filesToDelete) {
         $progress++
         $percentComplete = ($progress / $totalFiles) * 100
@@ -194,24 +180,19 @@ function Remove-StaleData {
         }
     }
 
-    # Clear progress bar
     Write-Progress -Activity "Deleting Stale Files" -Completed
 
-    # Show summary
     Write-Host "`nDeletion Summary:"
     Write-Host "Successfully deleted: $deletedFiles files"
     Write-Host "Failed to delete: $failedFiles files"
     Write-Host "Total space freed: $totalSizeReadable"
 }
 
-# Function to perform stale data scan
 function Start-StaleDataScan {
-    # Show drive selection menu
     $driveOptions = Get-AvailableDrives
     $selectedDrives = Show-Menu -Title "Select Drives to Scan" -Options $driveOptions -MultiSelect
     $drivePaths = $selectedDrives | ForEach-Object { "$($_.Substring(0, 1)):\" }
     
-    # Get scan parameters
     $params = Get-ScanParameters
     
     Write-Host "`nStarting stale data analysis..."
@@ -219,10 +200,8 @@ function Start-StaleDataScan {
     Write-Host "Looking for files not accessed in the last $($params.LastAccessDays) days"
     Write-Host "Minimum file size: $(Format-FileSize -Size $params.MinSize)"
     
-    # Get current date for comparison
     $cutOffDate = (Get-Date).AddDays(-$params.LastAccessDays)
     
-    # Scan all selected drives
     $allFiles = @()
     $driveNumber = 1
     
@@ -237,14 +216,11 @@ function Start-StaleDataScan {
         $driveNumber++
     }
     
-    # Clear progress bar
     Write-Progress -Activity "Scanning Drives" -Completed
     
     if ($allFiles) {
-        # Export to CSV
         $allFiles | Export-Csv -Path $OutputFile -NoTypeInformation
         
-        # Summary statistics per drive
         Write-Host "`nAnalysis Complete!"
         
         $drivePaths | ForEach-Object {
@@ -270,7 +246,6 @@ function Start-StaleDataScan {
         Write-Host "Total size across all drives: $grandSizeReadable"
         Write-Host "Results have been exported to: $OutputFile"
         
-        # Ask if user wants to open the CSV
         $openCsv = Read-Host "`nWould you like to open the CSV file? (Y/N)"
         if ($openCsv -eq 'Y') {
             Invoke-Item $OutputFile
@@ -281,20 +256,17 @@ function Start-StaleDataScan {
     }
 }
 
-# Function to perform folder scan
 function Start-FolderScan {
     param (
         [Parameter(Mandatory = $true)]
         [string]$FolderPath
     )
 
-    # Verify folder exists
     if (-not (Test-Path -Path $FolderPath -PathType Container)) {
         Write-Error "Folder not found: $FolderPath"
         return
     }
 
-    # Get scan parameters
     $params = Get-ScanParameters
     
     Write-Host "`nStarting stale data analysis..."
@@ -302,24 +274,19 @@ function Start-FolderScan {
     Write-Host "Looking for files not accessed in the last $($params.LastAccessDays) days"
     Write-Host "Minimum file size: $(Format-FileSize -Size $params.MinSize)"
     
-    # Get current date for comparison
     $cutOffDate = (Get-Date).AddDays(-$params.LastAccessDays)
     
-    # Scan folder
     $files = Start-DriveScan -DrivePath $FolderPath `
         -CutOffDate $cutOffDate `
         -MinSize $params.MinSize `
         -TotalDrives 1 `
         -CurrentDriveNumber 1
     
-    # Clear progress bar
     Write-Progress -Activity "Scanning Folder" -Completed
     
     if ($files) {
-        # Export to CSV
         $files | Export-Csv -Path $OutputFile -NoTypeInformation
         
-        # Summary statistics
         Write-Host "`nAnalysis Complete!"
         
         $totalFiles = $files.Count
@@ -331,7 +298,6 @@ function Start-FolderScan {
         Write-Host "Total size of stale files: $totalSizeReadable"
         Write-Host "Results have been exported to: $OutputFile"
         
-        # Ask if user wants to open the CSV
         $openCsv = Read-Host "`nWould you like to open the CSV file? (Y/N)"
         if ($openCsv -eq 'Y') {
             Invoke-Item $OutputFile
@@ -342,7 +308,6 @@ function Start-FolderScan {
     }
 }
 
-# Function to scan a drive or folder and return results
 function Start-DriveScan {
     param (
         [string]$DrivePath,
@@ -354,14 +319,11 @@ function Start-DriveScan {
     
     Write-Host "`nScanning path: $DrivePath"
     
-    # Initialize progress counter for this drive/folder
     $progress = 0
     $totalFiles = (Get-ChildItem -Path $DrivePath -Recurse -File -ErrorAction SilentlyContinue).Count
     
-    # Get all files recursively
     $files = Get-ChildItem -Path $DrivePath -Recurse -File -ErrorAction SilentlyContinue | 
         ForEach-Object {
-            # Update progress
             $progress++
             $overallProgress = (($CurrentDriveNumber - 1) / $TotalDrives * 100) + ($progress / $totalFiles * (100 / $TotalDrives))
             
@@ -369,7 +331,6 @@ function Start-DriveScan {
                 -Status "$($_.FullName)" `
                 -PercentComplete $overallProgress
             
-            # Process file
             if ($_.LastAccessTime -lt $CutOffDate -and $_.Length -ge $MinSize) {
                 $_ | Select-Object @{
                     Name = 'Drive'
@@ -409,9 +370,7 @@ function Start-DriveScan {
     return $files
 }
 
-# Main script
 try {
-    # Show main menu
     $mainMenuOptions = @(
         "Scan drives for stale data",
         "Scan specific folder for stale data",
@@ -435,7 +394,6 @@ try {
                 }
             }
             "Delete files using CSV report" {
-                # Prompt for CSV file
                 $csvPath = Read-Host "`nEnter the path to the CSV file (press Enter for $OutputFile)"
                 if ([string]::IsNullOrWhiteSpace($csvPath)) {
                     $csvPath = $OutputFile
@@ -457,7 +415,6 @@ catch {
     exit 1
 }
 
-# Function to convert bytes to human-readable format
 function Format-FileSize {
     param ([int64]$Size)
     $sizes = 'Bytes,KB,MB,GB,TB'
@@ -470,14 +427,13 @@ function Format-FileSize {
     "{0:N2} {1}" -f $Size, $sizes[$index]
 }
 
-# Function to convert human-readable size to bytes
 function Convert-ToBytes {
     param (
         [string]$Size
     )
     
     $size = $size.Trim().ToUpper()
-    if ($size -match '^\d+$') { return [int64]$size }  # Just a number means bytes
+    if ($size -match '^\d+$') { return [int64]$size }
     
     $value = [int64]($size -replace '[^0-9.]', '')
     $unit = $size -replace '[0-9.]', ''
@@ -491,7 +447,6 @@ function Convert-ToBytes {
     }
 }
 
-# Function to show menu and get user selection(s)
 function Show-Menu {
     param (
         [string]$Title = 'Select an option',
@@ -526,7 +481,6 @@ function Show-Menu {
     }
 }
 
-# Function to get available drives
 function Get-AvailableDrives {
     $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 }
     return $drives | ForEach-Object {
@@ -537,11 +491,9 @@ function Get-AvailableDrives {
     }
 }
 
-# Function to get scan parameters
 function Get-ScanParameters {
     $params = @{}
     
-    # Get last access time threshold
     Write-Host "`nSelect last access time threshold:"
     $timeOptions = @(
         "30 days",
@@ -561,7 +513,6 @@ function Get-ScanParameters {
         $params.LastAccessDays = [int]($timeChoice -replace " days","")
     }
     
-    # Get minimum file size
     Write-Host "`nSelect minimum file size to consider:"
     $sizeOptions = @(
         "1 MB",
@@ -584,23 +535,19 @@ function Get-ScanParameters {
     return $params
 }
 
-# Function to remove stale data based on CSV report
 function Remove-StaleData {
     param (
         [Parameter(Mandatory = $true)]
         [string]$CsvPath
     )
 
-    # Verify CSV exists
     if (-not (Test-Path $CsvPath)) {
         Write-Error "CSV file not found: $CsvPath"
         return
     }
 
-    # Import CSV
     $filesToDelete = Import-Csv -Path $CsvPath
 
-    # Show summary before deletion
     $totalFiles = $filesToDelete.Count
     $totalSize = ($filesToDelete | Measure-Object -Property SizeInBytes -Sum).Sum
     $totalSizeReadable = Format-FileSize -Size $totalSize
@@ -609,19 +556,16 @@ function Remove-StaleData {
     Write-Host "Total files to delete: $totalFiles"
     Write-Host "Total size to be freed: $totalSizeReadable"
 
-    # Ask for confirmation
     $confirmation = Read-Host "`nAre you sure you want to delete these files? (Y/N)"
     if ($confirmation -ne 'Y') {
         Write-Host "Operation cancelled by user."
         return
     }
 
-    # Initialize counters
     $deletedFiles = 0
     $failedFiles = 0
     $progress = 0
 
-    # Process each file
     foreach ($file in $filesToDelete) {
         $progress++
         $percentComplete = ($progress / $totalFiles) * 100
@@ -647,17 +591,14 @@ function Remove-StaleData {
         }
     }
 
-    # Clear progress bar
     Write-Progress -Activity "Deleting Stale Files" -Completed
 
-    # Show summary
     Write-Host "`nDeletion Summary:"
     Write-Host "Successfully deleted: $deletedFiles files"
     Write-Host "Failed to delete: $failedFiles files"
     Write-Host "Total space freed: $totalSizeReadable"
 }
 
-# Function to scan a drive and return results
 function Start-DriveScan {
     param (
         [string]$DrivePath,
@@ -669,14 +610,28 @@ function Start-DriveScan {
     
     Write-Host "`nScanning drive: $DrivePath"
     
-    # Initialize progress counter for this drive
+    # Initialize progress counter
     $progress = 0
-    $totalFiles = (Get-ChildItem -Path $DrivePath -Recurse -File -ErrorAction SilentlyContinue).Count
     
-    # Get all files recursively
-    $files = Get-ChildItem -Path $DrivePath -Recurse -File -ErrorAction SilentlyContinue | 
-        ForEach-Object {
-            # Update progress
+    # Determine if we need to exclude Windows directory
+    if ($DrivePath -eq "C:\") {
+        Write-Host "Excluding Windows directory from scan"
+        
+        # Get total files, excluding Windows folder
+        $totalFiles = @(Get-ChildItem -Path $DrivePath -Exclude "Windows" -Recurse -File -ErrorAction SilentlyContinue).Count
+        
+        # Get all files, excluding Windows folder
+        $files = Get-ChildItem -Path $DrivePath -Exclude "Windows" -Recurse -File -ErrorAction SilentlyContinue
+    } else {
+        # Get total files for non-C: drives
+        $totalFiles = @(Get-ChildItem -Path $DrivePath -Recurse -File -ErrorAction SilentlyContinue).Count
+        
+        # Get all files for non-C: drives
+        $files = Get-ChildItem -Path $DrivePath -Recurse -File -ErrorAction SilentlyContinue
+    }
+    
+    # Process the files
+    $files = $files | ForEach-Object {
             $progress++
             $overallProgress = (($CurrentDriveNumber - 1) / $TotalDrives * 100) + ($progress / $totalFiles * (100 / $TotalDrives))
             
@@ -684,7 +639,6 @@ function Start-DriveScan {
                 -Status "Drive $CurrentDriveNumber of $TotalDrives - $($_.FullName)" `
                 -PercentComplete $overallProgress
             
-            # Process file
             if ($_.LastAccessTime -lt $CutOffDate -and $_.Length -ge $MinSize) {
                 $_ | Select-Object @{
                     Name = 'Drive'
@@ -724,14 +678,11 @@ function Start-DriveScan {
     return $files
 }
 
-# Function to perform stale data scan
 function Start-StaleDataScan {
-    # Show drive selection menu
     $driveOptions = Get-AvailableDrives
     $selectedDrives = Show-Menu -Title "Select Drives to Scan" -Options $driveOptions -MultiSelect
     $drivePaths = $selectedDrives | ForEach-Object { "$($_.Substring(0, 1)):\" }
     
-    # Get scan parameters
     $params = Get-ScanParameters
     
     Write-Host "`nStarting stale data analysis..."
@@ -739,10 +690,8 @@ function Start-StaleDataScan {
     Write-Host "Looking for files not accessed in the last $($params.LastAccessDays) days"
     Write-Host "Minimum file size: $(Format-FileSize -Size $params.MinSize)"
     
-    # Get current date for comparison
     $cutOffDate = (Get-Date).AddDays(-$params.LastAccessDays)
     
-    # Scan all selected drives
     $allFiles = @()
     $driveNumber = 1
     
@@ -757,14 +706,11 @@ function Start-StaleDataScan {
         $driveNumber++
     }
     
-    # Clear progress bar
     Write-Progress -Activity "Scanning Drives" -Completed
     
     if ($allFiles) {
-        # Export to CSV
         $allFiles | Export-Csv -Path $OutputFile -NoTypeInformation
         
-        # Summary statistics per drive
         Write-Host "`nAnalysis Complete!"
         
         $drivePaths | ForEach-Object {
@@ -790,7 +736,6 @@ function Start-StaleDataScan {
         Write-Host "Total size across all drives: $grandSizeReadable"
         Write-Host "Results have been exported to: $OutputFile"
         
-        # Ask if user wants to open the CSV
         $openCsv = Read-Host "`nWould you like to open the CSV file? (Y/N)"
         if ($openCsv -eq 'Y') {
             Invoke-Item $OutputFile
